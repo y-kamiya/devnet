@@ -6,6 +6,8 @@ authors = ["Yuji Kamiya <y.kamiya0@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.7"
+torch = "^1.10.2"
+hydra-core = "^1.1.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
