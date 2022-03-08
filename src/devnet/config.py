@@ -18,8 +18,10 @@ class TrainerConfig:
     loglevel: LogLevel = LogLevel.INFO
     dataroot: str = "data"
     batch_size: int = 512
+    n_batch: int = 20
     epochs: int = 1
     tensorboard_log_dir: str = "${dataroot}/runs/${name}"
     model_path: str = "${dataroot}/${name}.pth"
-
-
+    log_interval: int = 1
+    eval_interval: int = 1
+    random_seed: int = 42
