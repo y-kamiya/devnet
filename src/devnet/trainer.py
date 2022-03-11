@@ -7,7 +7,10 @@ from enum import Enum, auto
 from logging import Logger, getLogger
 from typing import Optional
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import sklearn.metrics as metrics
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
@@ -61,13 +64,21 @@ class TableDataset(Dataset):
         self.logger.info(f"n_outliner: {torch.sum(self.ys == 1)}")
         self.logger.info("==============================")
 
-        self.n_columns = len(df.columns) - 1
+        self._column_names = df.columns
 
     def __getitem__(self, index):
         return self.xs[index], self.ys[index]
 
     def __len__(self):
         return len(self.ys)
+
+    @property
+    def n_columns(self):
+        return self.xs.shape[1]
+
+    @property
+    def column_names(self):
+        return self._column_names
 
 
 class BalancedBatchSampler(torch.utils.data.BatchSampler):
@@ -177,10 +188,10 @@ class Trainer:
             if epoch % self.config.eval_interval == 0:
                 self.eval(epoch)
 
-        self.eval(-1)
+        self.eval(-1, is_report=True)
 
     @torch.no_grad()
-    def eval(self, epoch: int) -> None:
+    def eval(self, epoch: int, is_report=False) -> None:
         self.model.eval()
 
         y_preds = []
@@ -201,3 +212,49 @@ class Trainer:
         self.logger.info(
             f"[eval] epoch: {epoch}, AUC-ROC: %.4f, AUC-PR: %.4f" % (roc_auc, ap)
         )
+
+        if is_report:
+            self.report(y_trues, y_preds)
+
+    @torch.no_grad()
+    def report(self, y_trues: torch.Tensor, y_preds: torch.Tensor):
+        fig = plt.figure()
+        ax_pr = fig.add_subplot(3, 1, 1)
+        ax_hist1 = fig.add_subplot(3, 1, 2)
+        ax_hist2 = fig.add_subplot(3, 1, 3)
+
+        p, r, t = metrics.precision_recall_curve(y_trues, y_preds)
+        self._plot_prec_recall_vs_tresh(ax_pr, p, r, t)
+
+        score_cls0 = y_preds[y_trues == 0]
+        score_cls1 = y_preds[y_trues == 1]
+        self._plot_histgram(ax_hist1, score_cls0, score_cls1)
+        self._plot_histgram(ax_hist2, score_cls0, score_cls1, is_zoom=True)
+
+        plt.show()
+
+    def _plot_prec_recall_vs_tresh(self, ax, precisions, recalls, thresholds):
+        ax.plot(thresholds, precisions[:-1], "b--", label="precision")
+        ax.plot(thresholds, recalls[:-1], "g--", label="recall")
+        ax.set_xlabel("Threshold")
+        ax.legend(loc="upper right")
+        ax.set_ylim([0, 1])
+
+    def _plot_histgram(self, ax, score_cls0, score_cls1, is_zoom=False):
+        bins = np.arange(-1.5, 8.0, 0.25)
+        # bins = np.arange(-0.3, 0.3, 0.002)
+        ax.hist(
+            [score_cls0, score_cls1],
+            bins=bins,
+            color=["blue", "red"],
+            label=["class 0", "class 1"],
+            stacked=True,
+        )
+        locs = ax.get_yticks()
+        ymax = locs[-1]
+        if is_zoom:
+            ymax /= 10
+        ax.set_ylim([0, ymax])
+        ax.set_yticks(np.arange(0, ymax, ymax / 5))
+        ax.vlines(x=[1.282, 1.960, 2.576, 4.417], ymin=0, ymax=ymax)
+        ax.grid(True)
