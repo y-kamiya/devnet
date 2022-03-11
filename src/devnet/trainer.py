@@ -113,6 +113,7 @@ class Trainer:
         self.dataloader_train = self._create_dataloader(dataset_train)
         self.dataloader_eval = self._create_dataloader(dataset_eval)
 
+        torch.manual_seed(config.random_seed)
         self.model = Model(dataset_train.n_columns)
         self.optimizer = optim.RMSprop(
             self.model.parameters(), lr=0.001, alpha=0.9, eps=1e-7, weight_decay=0.01

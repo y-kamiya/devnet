@@ -24,4 +24,4 @@ class TrainerConfig:
     model_path: str = "${dataroot}/${name}.pth"
     log_interval: int = 1
     eval_interval: int = 1
-    random_seed: int = 42
+    random_seed: int = torch.random.initial_seed()
