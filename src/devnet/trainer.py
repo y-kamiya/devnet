@@ -22,13 +22,16 @@ from .config import TrainerConfig
 
 
 class Model(nn.Module):
-    def __init__(self, n_input):
+    def __init__(self, n_input: int, state_dict=None):
         super(Model, self).__init__()
+        self.n_input = n_input
         self.fc = nn.Linear(n_input, 20)
         self.output = nn.Linear(20, 1)
 
         nn.init.xavier_uniform_(self.fc.weight, gain=nn.init.calculate_gain("relu"))
         nn.init.xavier_uniform_(self.output.weight, gain=nn.init.calculate_gain("relu"))
+        if state_dict is not None:
+            self.load_state_dict(state_dict)
 
     def forward(self, x):
         x = F.relu(self.fc(x))
@@ -115,6 +118,8 @@ class Trainer:
         self.config = config
         self.logger = getLogger(__name__) if logger is None else logger
 
+        torch.manual_seed(config.random_seed)
+
         dataset_train = TableDataset(self.config, Phase.TRAIN, self.logger)
         dataset_eval = TableDataset(self.config, Phase.EVAL, self.logger)
         assert (
@@ -124,8 +129,16 @@ class Trainer:
         self.dataloader_train = self._create_dataloader(dataset_train)
         self.dataloader_eval = self._create_dataloader(dataset_eval)
 
-        torch.manual_seed(config.random_seed)
-        self.model = Model(dataset_train.n_columns)
+        loaded_data = None
+        if os.path.isfile(config.model_path):
+            self.logger.info(f"load model from {self.config.model_path}")
+            loaded_data = torch.load(self.config.model_path, map_location=self.config.device)
+
+        self.model = Model(
+            dataset_train.n_columns if loaded_data is None else loaded_data["n_input"],
+            None if loaded_data is None else loaded_data["model"] 
+        )
+
         self.optimizer = optim.RMSprop(
             self.model.parameters(), lr=0.001, alpha=0.9, eps=1e-7, weight_decay=0.01
         )
@@ -141,6 +154,15 @@ class Trainer:
             self.config.random_seed,
         )
         return torch.utils.data.DataLoader(dataset, batch_sampler=sampler)
+
+    def save(self, model_path: str) -> None:
+        data = {
+            "model": self.model.state_dict(),
+            "n_input": self.model.n_input,
+        }
+
+        torch.save(data, model_path)
+        self.logger.info(f"save model to {model_path}")
 
     def forward(self, x, y):
         y_pred = self.model(x).squeeze()
@@ -212,6 +234,8 @@ class Trainer:
         self.logger.info(
             f"[eval] epoch: {epoch}, AUC-ROC: %.4f, AUC-PR: %.4f" % (roc_auc, ap)
         )
+
+        self.save(self.config.model_path)
 
         if is_report:
             self.report(y_trues, y_preds)

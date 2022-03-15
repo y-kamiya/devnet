@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -20,8 +21,8 @@ class TrainerConfig:
     batch_size: int = 512
     n_batch: int = 20
     epochs: int = 1
-    tensorboard_log_dir: str = "${dataroot}/runs/${name}"
-    model_path: str = "${dataroot}/${name}.pth"
+    name: str = str(uuid.uuid4())[:8]
+    model_path: str = "${dataroot}/models/${name}.pth"
     log_interval: int = 1
     eval_interval: int = 1
     random_seed: int = torch.random.initial_seed()

@@ -17,11 +17,14 @@ cs.store(name="base_config", node=TrainerConfig)
 
 @hydra.main(config_path="conf", config_name="main")
 def main(config: TrainerConfig):
-    dataroot = config.dataroot
-    if not os.path.isabs(dataroot):
-        config.dataroot = os.path.join(hydra.utils.get_original_cwd(), dataroot)
+    if not os.path.isabs(config.dataroot):
+        config.dataroot = os.path.join(hydra.utils.get_original_cwd(), config.dataroot)
+    if not os.path.isabs(config.model_path):
+        config.model_path = os.path.join(hydra.utils.get_original_cwd(), config.model_path)
 
     print(OmegaConf.to_yaml(config))
+
+    os.makedirs(os.path.dirname(config.model_path))
 
     logger = setup_logger(name=__name__, level=config.loglevel.name)
 
