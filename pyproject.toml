@@ -5,7 +5,7 @@ description = ""
 authors = ["Yuji Kamiya <y.kamiya0@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "3.7.1>=,<4.0"
+python = ">=3.7.1,<4.0"
 torch = "^1.10.2"
 hydra-core = "^1.1.1"
 logzero = "^1.7.0"
