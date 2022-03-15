@@ -51,15 +51,24 @@ class TableDataset(Dataset):
         self.logger = logger
 
         path = os.path.join(config.dataroot, f"{phase.name.lower()}.csv")
+        if phase == Phase.PREDICT and config.predict_input:
+            path = config.predict_input
+
         df = pd.read_csv(path)
 
-        if "class" not in df.columns:
+        if "class" not in df.columns and phase != Phase.PREDICT:
             assert False, f"columns of 'class' is necesasry in {path}"
 
-        self.xs = torch.tensor(
-            df.drop(columns=["class"]).values, dtype=torch.float32, requires_grad=True
-        )
-        self.ys = torch.tensor(df.loc[:, "class"].values, dtype=torch.int8)
+        if "class" not in df.columns:
+            self.xs = torch.tensor(df.values, dtype=torch.float32)
+            self.ys = torch.tensor([-1], dtype=torch.int8).expand(len(self.xs))
+        else:
+            is_train = phase == Phase.TRAIN
+            self.xs = torch.tensor(
+                df.drop(columns=["class"]).values, dtype=torch.float32, requires_grad=is_train
+            )
+            self.ys = torch.tensor(df.loc[:, "class"].values, dtype=torch.int8)
+
         self.logger.info("==============================")
         self.logger.info(f"TableDataset {phase.name}")
         self.logger.info(f"data shape: {self.xs.shape}")
@@ -67,7 +76,7 @@ class TableDataset(Dataset):
         self.logger.info(f"n_outliner: {torch.sum(self.ys == 1)}")
         self.logger.info("==============================")
 
-        self._column_names = df.columns
+        self._df = df
 
     def __getitem__(self, index):
         return self.xs[index], self.ys[index]
@@ -80,8 +89,8 @@ class TableDataset(Dataset):
         return self.xs.shape[1]
 
     @property
-    def column_names(self):
-        return self._column_names
+    def df(self):
+        return self._df
 
 
 class BalancedBatchSampler(torch.utils.data.BatchSampler):
@@ -136,7 +145,7 @@ class Trainer:
 
         self.model = Model(
             dataset_train.n_columns if loaded_data is None else loaded_data["n_input"],
-            None if loaded_data is None else loaded_data["model"] 
+            None if loaded_data is None else loaded_data["model"]
         )
 
         self.optimizer = optim.RMSprop(
@@ -239,6 +248,37 @@ class Trainer:
 
         if is_report:
             self.report(y_trues, y_preds)
+
+    @classmethod
+    @torch.no_grad()
+    def predict(cls, config, logger):
+        dataset = TableDataset(config, Phase.PREDICT, logger)
+        dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+
+        if not os.path.isfile(config.model_path):
+            logger.error("model_path is necessary on predict")
+            return
+
+        loaded_data = torch.load(config.model_path, map_location=config.device)
+        if loaded_data["n_input"] != dataset.n_columns:
+            logger.error(f"n_input: {loaded_data['n_input']} and n_columns: {dataset.n_columns} should be same")
+            return
+
+        model = Model(loaded_data["n_input"], loaded_data["model"])
+
+        y_preds = []
+        for i, (x, y) in enumerate(dataloader):
+            x = x.to(config.device)
+            y = y.to(config.device)
+            score = model(x)
+            y_preds.extend(score.squeeze().tolist())
+
+        y_preds = torch.tensor(y_preds)
+
+        df = dataloader.dataset.df
+        df["score"] = y_preds
+        df.to_csv(config.predict_output)
+        logger.info(f"write predict result to {config.predict_output}")
 
     @torch.no_grad()
     def report(self, y_trues: torch.Tensor, y_preds: torch.Tensor):

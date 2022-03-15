@@ -24,9 +24,13 @@ def main(config: TrainerConfig):
 
     print(OmegaConf.to_yaml(config))
 
-    os.makedirs(os.path.dirname(config.model_path))
+    os.makedirs(os.path.dirname(config.model_path), exist_ok=True)
 
     logger = setup_logger(name=__name__, level=config.loglevel.name)
+
+    if config.predict_only:
+        Trainer.predict(config, logger)
+        sys.exit()
 
     trainer = Trainer(config, logger)
     trainer.train()

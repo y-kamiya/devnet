@@ -23,6 +23,9 @@ class TrainerConfig:
     epochs: int = 1
     name: str = str(uuid.uuid4())[:8]
     model_path: str = "${dataroot}/models/${name}.pth"
+    predict_only: bool = False
+    predict_input: str = "${dataroot}/predict.csv"
+    predict_output: str = "${dataroot}/predict_result.csv"
     log_interval: int = 1
     eval_interval: int = 1
     random_seed: int = torch.random.initial_seed()

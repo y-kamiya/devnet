@@ -4,3 +4,8 @@ defaults:
 
 dataroot: data/debug
 
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
