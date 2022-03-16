@@ -128,6 +128,8 @@ class Trainer:
         self.logger = getLogger(__name__) if logger is None else logger
 
         torch.manual_seed(config.random_seed)
+        os.makedirs(config.output_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(config.model_path), exist_ok=True)
 
         dataset_train = TableDataset(self.config, Phase.TRAIN, self.logger)
         dataset_eval = TableDataset(self.config, Phase.EVAL, self.logger)
@@ -295,7 +297,8 @@ class Trainer:
         self._plot_histgram(ax_hist1, score_cls0, score_cls1)
         self._plot_histgram(ax_hist2, score_cls0, score_cls1, is_zoom=True)
 
-        plt.show()
+        output_path = os.path.join(self.config.output_dir, "class_histgram.jpg")
+        fig.savefig(output_path)
 
     def _plot_prec_recall_vs_tresh(self, ax, precisions, recalls, thresholds):
         ax.plot(thresholds, precisions[:-1], "b--", label="precision")
