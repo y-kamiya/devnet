@@ -261,6 +261,8 @@ class Trainer:
             logger.error("model_path is necessary on predict")
             return
 
+        os.makedirs(os.path.dirname(config.predict_output), exist_ok=True)
+
         loaded_data = torch.load(config.model_path, map_location=config.device)
         if loaded_data["n_input"] != dataset.n_columns:
             logger.error(f"n_input: {loaded_data['n_input']} and n_columns: {dataset.n_columns} should be same")
