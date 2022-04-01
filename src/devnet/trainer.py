@@ -116,6 +116,9 @@ class BalancedBatchSampler(torch.utils.data.BatchSampler):
         return self.batch_size
 
     def _choice(self, data: torch.Tensor) -> list[int]:
+        if len(data) == 0:
+            return []
+
         indices = torch.randint(
             high=len(data), size=(self.n_samples_per_class,), generator=self.gen
         )
