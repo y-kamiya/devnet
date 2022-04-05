@@ -20,7 +20,9 @@ def main(config: TrainerConfig):
     if not os.path.isabs(config.dataroot):
         config.dataroot = os.path.join(hydra.utils.get_original_cwd(), config.dataroot)
     if not os.path.isabs(config.model_path):
-        config.model_path = os.path.join(hydra.utils.get_original_cwd(), config.model_path)
+        config.model_path = os.path.join(
+            hydra.utils.get_original_cwd(), config.model_path
+        )
 
     print(OmegaConf.to_yaml(config))
 

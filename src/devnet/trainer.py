@@ -65,7 +65,9 @@ class TableDataset(Dataset):
         else:
             is_train = phase == Phase.TRAIN
             self.xs = torch.tensor(
-                df.drop(columns=["class"]).values, dtype=torch.float32, requires_grad=is_train
+                df.drop(columns=["class"]).values,
+                dtype=torch.float32,
+                requires_grad=False,
             )
             self.ys = torch.tensor(df.loc[:, "class"].values, dtype=torch.int8)
 
@@ -146,11 +148,13 @@ class Trainer:
         loaded_data = None
         if os.path.isfile(config.model_path):
             self.logger.info(f"load model from {self.config.model_path}")
-            loaded_data = torch.load(self.config.model_path, map_location=self.config.device)
+            loaded_data = torch.load(
+                self.config.model_path, map_location=self.config.device
+            )
 
         self.model = Model(
             dataset_train.n_columns if loaded_data is None else loaded_data["n_input"],
-            None if loaded_data is None else loaded_data["model"]
+            None if loaded_data is None else loaded_data["model"],
         )
 
         self.optimizer = optim.RMSprop(
@@ -268,7 +272,9 @@ class Trainer:
 
         loaded_data = torch.load(config.model_path, map_location=config.device)
         if loaded_data["n_input"] != dataset.n_columns:
-            logger.error(f"n_input: {loaded_data['n_input']} and n_columns: {dataset.n_columns} should be same")
+            logger.error(
+                f"n_input: {loaded_data['n_input']} and n_columns: {dataset.n_columns} should be same"
+            )
             return
 
         model = Model(loaded_data["n_input"], loaded_data["model"])
