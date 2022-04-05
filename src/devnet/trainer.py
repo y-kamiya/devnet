@@ -67,7 +67,6 @@ class TableDataset(Dataset):
             self.xs = torch.tensor(
                 df.drop(columns=["class"]).values,
                 dtype=torch.float32,
-                requires_grad=False,
             )
             self.ys = torch.tensor(df.loc[:, "class"].values, dtype=torch.int8)
 
