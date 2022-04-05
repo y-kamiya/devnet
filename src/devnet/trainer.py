@@ -295,6 +295,15 @@ class Trainer:
 
     @torch.no_grad()
     def report(self, y_trues: torch.Tensor, y_preds: torch.Tensor):
+        report_path = os.path.join(self.config.output_dir, "report.txt")
+        with open(report_path, "w") as f:
+            thresholds = [(1.282, "80%"), (1.960, "95%"), (2.576, "99%"), (4.417, "99.999%")]
+            for (thres, percent) in thresholds:
+                result = metrics.classification_report(y_trues, y_preds > thres, digits=4)
+                output = f"threshold: {thres} ({percent})\n{result}\n"
+                f.write(output)
+                print(output)
+
         fig = plt.figure()
         ax_pr = fig.add_subplot(3, 1, 1)
         ax_hist1 = fig.add_subplot(3, 1, 2)
