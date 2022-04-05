@@ -230,7 +230,7 @@ class Trainer:
         self.eval(-1, is_report=True)
 
     @torch.no_grad()
-    def eval(self, epoch: int, is_report=False) -> None:
+    def eval(self, epoch: int, is_report: bool = False, is_save: bool = True) -> None:
         self.model.eval()
 
         y_preds = []
@@ -252,7 +252,8 @@ class Trainer:
             f"[eval] epoch: {epoch}, AUC-ROC: %.4f, AUC-PR: %.4f" % (roc_auc, ap)
         )
 
-        self.save(self.config.model_path)
+        if is_save:
+            self.save(self.config.model_path)
 
         if is_report:
             self.report(y_trues, y_preds)
