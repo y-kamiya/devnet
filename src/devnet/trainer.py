@@ -135,30 +135,50 @@ class Trainer:
         os.makedirs(config.output_dir, exist_ok=True)
         os.makedirs(os.path.dirname(config.model_path), exist_ok=True)
 
-        dataset_train = TableDataset(self.config, Phase.TRAIN, self.logger)
-        dataset_eval = TableDataset(self.config, Phase.EVAL, self.logger)
-        assert (
-            dataset_train.n_columns == dataset_eval.n_columns
-        ), "n_columns should be same in train and eval"
+        self._model: Optional[Model] = None
+        self._optimizer: Optional[optim.Optimizer] = None
+        self.dataloader: dict[Phase, DataLoader] = {}
 
-        self.dataloader_train = self._create_dataloader(dataset_train)
-        self.dataloader_eval = self._create_dataloader(dataset_eval)
+    @property
+    def model(self) -> Model:
+        if self._model is None:
+            assert False, "model is not initialized"
+        return self._model
 
-        loaded_data = None
-        if os.path.isfile(config.model_path):
-            self.logger.info(f"load model from {self.config.model_path}")
-            loaded_data = torch.load(
-                self.config.model_path, map_location=self.config.device
+    @property
+    def optimizer(self) -> optim.Optimizer:
+        if self._optimizer is None:
+            assert False, "optimizer is not initialized"
+        return self._optimizer
+
+    def _setup(self, phase: Phase, data=None):
+        if phase in self.dataloader:
+            return
+
+        dataset = TableDataset(self.config, phase, self.logger)
+        self.dataloader[phase] = self._create_dataloader(dataset)
+
+        if self._model is None:
+            loaded_data = None
+            if os.path.isfile(self.config.model_path):
+                self.logger.info(f"load model from {self.config.model_path}")
+                loaded_data = torch.load(
+                    self.config.model_path, map_location=self.config.device
+                )
+
+            self._model = Model(
+                dataset.n_columns if loaded_data is None else loaded_data["n_input"],
+                None if loaded_data is None else loaded_data["model"],
             )
 
-        self.model = Model(
-            dataset_train.n_columns if loaded_data is None else loaded_data["n_input"],
-            None if loaded_data is None else loaded_data["model"],
-        )
+        assert (
+            self.model.n_input == dataset.n_columns
+        ), "model.n_input should be same with n_column of dataset"
 
-        self.optimizer = optim.RMSprop(
-            self.model.parameters(), lr=0.001, alpha=0.9, eps=1e-7, weight_decay=0.01
-        )
+        if phase == Phase.TRAIN:
+            self._optimizer = optim.RMSprop(
+                self.model.parameters(), lr=0.001, alpha=0.9, eps=1e-7, weight_decay=0.01
+            )
 
     def _create_dataloader(self, dataset: TableDataset) -> DataLoader:
         if dataset.phase == Phase.EVAL:
@@ -193,11 +213,9 @@ class Trainer:
         return torch.mean(inlier + outlier)
 
     def _train(self) -> float:
-        self.model.train()
-
         losses = []
 
-        for i, (x, y) in enumerate(self.dataloader_train):
+        for i, (x, y) in enumerate(self.dataloader[Phase.TRAIN]):
             x = x.to(self.config.device)
             y = y.to(self.config.device)
 
@@ -212,6 +230,9 @@ class Trainer:
         return sum(losses) / len(losses)
 
     def train(self) -> None:
+        self._setup(Phase.TRAIN)
+        self.model.train()
+
         for epoch in range(self.config.epochs):
             start_time = time.time()
             loss = self._train()
@@ -231,12 +252,13 @@ class Trainer:
 
     @torch.no_grad()
     def eval(self, epoch: int, is_report: bool = False, is_save: bool = True) -> None:
+        self._setup(Phase.EVAL)
         self.model.eval()
 
         y_preds = []
         y_trues = []
 
-        for i, (x, y) in enumerate(self.dataloader_eval):
+        for i, (x, y) in enumerate(self.dataloader[Phase.EVAL]):
             x = x.to(self.config.device)
             y = y.to(self.config.device)
             score = self.model(x)
