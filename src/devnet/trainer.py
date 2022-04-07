@@ -75,6 +75,7 @@ class TableDataset(Dataset):
         self.logger.info(f"data shape: {self.xs.shape}")
         self.logger.info(f"n_inliner: {torch.sum(self.ys == 0)}")
         self.logger.info(f"n_outliner: {torch.sum(self.ys == 1)}")
+        self.logger.info(f"path: {path}")
         self.logger.info("==============================")
 
         self._df = df
@@ -151,7 +152,7 @@ class Trainer:
             assert False, "optimizer is not initialized"
         return self._optimizer
 
-    def _setup(self, phase: Phase, data=None):
+    def _setup(self, phase: Phase, is_load=False):
         if phase in self.dataloader:
             return
 
@@ -165,6 +166,9 @@ class Trainer:
                 loaded_data = torch.load(
                     self.config.model_path, map_location=self.config.device
                 )
+
+            if is_load and loaded_data is None:
+                raise ValueError("model_path is necessary on predict")
 
             self._model = Model(
                 dataset.n_columns if loaded_data is None else loaded_data["n_input"],
@@ -181,7 +185,7 @@ class Trainer:
             )
 
     def _create_dataloader(self, dataset: TableDataset) -> DataLoader:
-        if dataset.phase == Phase.EVAL:
+        if dataset.phase != Phase.TRAIN:
             return DataLoader(dataset, batch_size=self.config.batch_size, shuffle=False)
 
         sampler = BalancedBatchSampler(
@@ -280,40 +284,29 @@ class Trainer:
         if is_report:
             self.report(y_trues, y_preds)
 
-    @classmethod
     @torch.no_grad()
-    def predict(cls, config, logger):
-        dataset = TableDataset(config, Phase.PREDICT, logger)
-        dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    def predict(self):
+        self._setup(Phase.PREDICT)
+        self.model.eval()
 
-        if not os.path.isfile(config.model_path):
-            logger.error("model_path is necessary on predict")
-            return
-
+        config = self.config
         os.makedirs(os.path.dirname(config.predict_output), exist_ok=True)
 
-        loaded_data = torch.load(config.model_path, map_location=config.device)
-        if loaded_data["n_input"] != dataset.n_columns:
-            logger.error(
-                f"n_input: {loaded_data['n_input']} and n_columns: {dataset.n_columns} should be same"
-            )
-            return
-
-        model = Model(loaded_data["n_input"], loaded_data["model"])
-
         y_preds = []
-        for i, (x, y) in enumerate(dataloader):
+        for i, (x, y) in enumerate(self.dataloader[Phase.PREDICT]):
             x = x.to(config.device)
             y = y.to(config.device)
-            score = model(x)
+            score = self.model(x)
             y_preds.extend(score.squeeze().tolist())
 
         y_preds = torch.tensor(y_preds)
 
-        df = dataloader.dataset.df
+        df = self.dataloader[Phase.PREDICT].dataset.df
         df["score"] = y_preds
         df.to_csv(config.predict_output)
-        logger.info(f"write predict result to {config.predict_output}")
+        self.logger.info(f"write predict result to {config.predict_output}")
+
+        return y_preds
 
     @torch.no_grad()
     def report(self, y_trues: torch.Tensor, y_preds: torch.Tensor):

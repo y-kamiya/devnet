@@ -28,11 +28,12 @@ def main(config: TrainerConfig):
 
     logger = setup_logger(name=__name__, level=config.loglevel.name)
 
+    trainer = Trainer(config, logger)
+
     if config.predict_only:
-        Trainer.predict(config, logger)
+        trainer.predict()
         sys.exit()
 
-    trainer = Trainer(config, logger)
     trainer.train()
 
 
