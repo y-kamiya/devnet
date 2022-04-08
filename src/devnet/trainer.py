@@ -44,10 +44,29 @@ class Phase(Enum):
     PREDICT = auto()
 
 
-class TableDataset(Dataset):
-    def __init__(self, config: TrainerConfig, phase: Phase, logger: Logger) -> None:
-        self.config = config
+class BaseDataset(Dataset):
+    def __init__(self, phase: Phase) -> None:
         self.phase = phase
+
+    def setup(self, x, y=None):
+        self.xs = torch.tensor(x, dtype=torch.float32)
+
+        if y is None:
+            self.ys = torch.tensor([-1], dtype=torch.int8).expand(len(self.xs))
+        else:
+            self.ys = torch.tensor(y, dtype=torch.int8)
+
+    def __getitem__(self, index):
+        return self.xs[index], self.ys[index]
+
+    def __len__(self):
+        return len(self.ys)
+
+
+class TableDataset(BaseDataset):
+    def __init__(self, config: TrainerConfig, phase: Phase, logger: Logger) -> None:
+        super().__init__(phase)
+        self.config = config
         self.logger = logger
 
         path = os.path.join(config.dataroot, f"{phase.name.lower()}.csv")
@@ -60,15 +79,9 @@ class TableDataset(Dataset):
             assert False, f"columns of 'class' is necesasry in {path}"
 
         if "class" not in df.columns:
-            self.xs = torch.tensor(df.values, dtype=torch.float32)
-            self.ys = torch.tensor([-1], dtype=torch.int8).expand(len(self.xs))
+            self.setup(df.values)
         else:
-            is_train = phase == Phase.TRAIN
-            self.xs = torch.tensor(
-                df.drop(columns=["class"]).values,
-                dtype=torch.float32,
-            )
-            self.ys = torch.tensor(df.loc[:, "class"].values, dtype=torch.int8)
+            self.setup(df.drop(columns=["class"]).values, df.loc[:, "class"].values)
 
         self.logger.info("==============================")
         self.logger.info(f"TableDataset {phase.name}")
@@ -79,12 +92,6 @@ class TableDataset(Dataset):
         self.logger.info("==============================")
 
         self._df = df
-
-    def __getitem__(self, index):
-        return self.xs[index], self.ys[index]
-
-    def __len__(self):
-        return len(self.ys)
 
     @property
     def n_columns(self):
@@ -97,7 +104,7 @@ class TableDataset(Dataset):
 
 class BalancedBatchSampler(torch.utils.data.BatchSampler):
     def __init__(
-        self, dataset: TableDataset, n_batch: int, batch_size: int, seed: int
+        self, dataset: BaseDataset, n_batch: int, batch_size: int, seed: int
     ) -> None:
         self.dataset = dataset
         self.n_batch = n_batch
@@ -157,7 +164,7 @@ class Trainer:
             return
 
         dataset = TableDataset(self.config, phase, self.logger)
-        self.dataloader[phase] = self._create_dataloader(dataset)
+        self.dataloader[phase] = self.create_dataloader(dataset)
 
         if self._model is None:
             loaded_data = None
@@ -184,7 +191,7 @@ class Trainer:
                 self.model.parameters(), lr=0.001, alpha=0.9, eps=1e-7, weight_decay=0.01
             )
 
-    def _create_dataloader(self, dataset: TableDataset) -> DataLoader:
+    def create_dataloader(self, dataset: BaseDataset) -> DataLoader:
         if dataset.phase != Phase.TRAIN:
             return DataLoader(dataset, batch_size=self.config.batch_size, shuffle=False)
 
@@ -216,10 +223,10 @@ class Trainer:
 
         return torch.mean(inlier + outlier)
 
-    def _train(self) -> float:
+    def _train(self, dataloader: DataLoader) -> float:
         losses = []
 
-        for i, (x, y) in enumerate(self.dataloader[Phase.TRAIN]):
+        for i, (x, y) in enumerate(dataloader):
             x = x.to(self.config.device)
             y = y.to(self.config.device)
 
@@ -239,7 +246,7 @@ class Trainer:
 
         for epoch in range(self.config.epochs):
             start_time = time.time()
-            loss = self._train()
+            loss = self._train(self.dataloader[Phase.TRAIN])
 
             if epoch % self.config.log_interval == 0:
                 elapsed_time = time.time() - start_time
@@ -259,18 +266,7 @@ class Trainer:
         self._setup(Phase.EVAL)
         self.model.eval()
 
-        y_preds = []
-        y_trues = []
-
-        for i, (x, y) in enumerate(self.dataloader[Phase.EVAL]):
-            x = x.to(self.config.device)
-            y = y.to(self.config.device)
-            score = self.model(x)
-            y_preds.extend(score.squeeze().tolist())
-            y_trues.extend(y.squeeze().tolist())
-
-        y_preds = torch.tensor(y_preds)
-        y_trues = torch.tensor(y_trues)
+        y_preds, y_trues = self.predict_scores(self.dataloader[Phase.EVAL])
 
         roc_auc = metrics.roc_auc_score(y_trues, y_preds)
         ap = metrics.average_precision_score(y_trues, y_preds)
@@ -292,21 +288,27 @@ class Trainer:
         config = self.config
         os.makedirs(os.path.dirname(config.predict_output), exist_ok=True)
 
-        y_preds = []
-        for i, (x, y) in enumerate(self.dataloader[Phase.PREDICT]):
-            x = x.to(config.device)
-            y = y.to(config.device)
-            score = self.model(x)
-            y_preds.extend(score.squeeze().tolist())
+        dataloader = self.dataloader[Phase.PREDICT]
+        y_preds, _ = self.predict_scores(dataloader)
 
-        y_preds = torch.tensor(y_preds)
-
-        df = self.dataloader[Phase.PREDICT].dataset.df
+        df = dataloader.dataset.df
         df["score"] = y_preds
         df.to_csv(config.predict_output)
+
         self.logger.info(f"write predict result to {config.predict_output}")
 
-        return y_preds
+    @torch.no_grad()
+    def predict_scores(self, dataloader: DataLoader) -> tuple[torch.Tensor, torch.Tensor]:
+        y_preds = []
+        y_trues = []
+        for i, (x, y) in enumerate(dataloader):
+            x = x.to(self.config.device)
+            y = y.to(self.config.device)
+            score = self.model(x)
+            y_preds.extend(score.squeeze().tolist())
+            y_trues.extend(y.squeeze().tolist())
+
+        return torch.tensor(y_preds), torch.tensor(y_trues)
 
     @torch.no_grad()
     def report(self, y_trues: torch.Tensor, y_preds: torch.Tensor):
