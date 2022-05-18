@@ -64,19 +64,13 @@ class BaseDataset(Dataset):
 
 
 class TableDataset(BaseDataset):
-    def __init__(self, config: TrainerConfig, phase: Phase, logger: Logger) -> None:
+    def __init__(self, df: pd.DataFrame, phase: Phase, logger: Logger) -> None:
         super().__init__(phase)
-        self.config = config
+        self._df = df
         self.logger = logger
 
-        path = os.path.join(config.dataroot, f"{phase.name.lower()}.csv")
-        if phase == Phase.PREDICT and config.predict_input:
-            path = config.predict_input
-
-        df = pd.read_csv(path)
-
         if "class" not in df.columns and phase != Phase.PREDICT:
-            assert False, f"columns of 'class' is necesasry in {path}"
+            raise ValueError("columns of 'class' is necesasry on train or eval phase")
 
         if "class" not in df.columns:
             self.setup(df.values)
@@ -88,10 +82,7 @@ class TableDataset(BaseDataset):
         self.logger.info(f"data shape: {self.xs.shape}")
         self.logger.info(f"n_inliner: {torch.sum(self.ys == 0)}")
         self.logger.info(f"n_outliner: {torch.sum(self.ys == 1)}")
-        self.logger.info(f"path: {path}")
         self.logger.info("==============================")
-
-        self._df = df
 
     @property
     def n_columns(self):
@@ -159,11 +150,19 @@ class Trainer:
             assert False, "optimizer is not initialized"
         return self._optimizer
 
-    def _setup(self, phase: Phase, is_load=False):
+    def _setup(self, phase: Phase, df=None, is_load=False):
         if phase in self.dataloader:
             return
 
-        dataset = TableDataset(self.config, phase, self.logger)
+        if df is None:
+            path = os.path.join(self.config.dataroot, f"{phase.name.lower()}.csv")
+            if phase == Phase.PREDICT and self.config.predict_input:
+                path = self.config.predict_input
+
+            self.logger.info(f"phase: {phase}, load data from {path}")
+            df = pd.read_csv(path)
+
+        dataset = TableDataset(df, phase, self.logger)
         self.dataloader[phase] = self.create_dataloader(dataset)
 
         if self._model is None:
@@ -240,8 +239,8 @@ class Trainer:
 
         return sum(losses) / len(losses)
 
-    def train(self) -> None:
-        self._setup(Phase.TRAIN)
+    def train(self, df_train: pd.DataFrame = None, df_eval: pd.DataFrame = None) -> None:
+        self._setup(Phase.TRAIN, df=df_train)
         self.model.train()
 
         for epoch in range(self.config.epochs):
@@ -257,13 +256,13 @@ class Trainer:
                 )
 
             if epoch % self.config.eval_interval == 0:
-                self.eval(epoch)
+                self.eval(epoch, df=df_eval)
 
         self.eval(-1, is_report=True)
 
     @torch.no_grad()
-    def eval(self, epoch: int, is_report: bool = False, is_save: bool = True) -> None:
-        self._setup(Phase.EVAL)
+    def eval(self, epoch: int, is_report: bool = False, is_save: bool = True, df: pd.DataFrame = None) -> None:
+        self._setup(Phase.EVAL, df=df)
         self.model.eval()
 
         y_preds, y_trues = self.predict_scores(self.dataloader[Phase.EVAL])
