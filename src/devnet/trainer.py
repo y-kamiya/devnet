@@ -45,6 +45,8 @@ class Phase(Enum):
 
 
 class BaseDataset(Dataset):
+    LABEL_NONE = -1
+
     def __init__(self, phase: Phase) -> None:
         self.phase = phase
 
@@ -52,7 +54,7 @@ class BaseDataset(Dataset):
         self.xs = torch.tensor(x, dtype=torch.float32)
 
         if y is None:
-            self.ys = torch.tensor([-1], dtype=torch.int8).expand(len(self.xs))
+            self.ys = torch.tensor([self.LABEL_NONE], dtype=torch.int8).expand(len(self.xs))
         else:
             self.ys = torch.tensor(y, dtype=torch.int8)
 
@@ -64,18 +66,20 @@ class BaseDataset(Dataset):
 
 
 class TableDataset(BaseDataset):
+    LABEL_NAME = "class"
+
     def __init__(self, df: pd.DataFrame, phase: Phase, logger: Logger) -> None:
         super().__init__(phase)
-        self._df = df
+        self._column_names = df.columns
         self.logger = logger
 
-        if "class" not in df.columns and phase != Phase.PREDICT:
-            raise ValueError("columns of 'class' is necesasry on train or eval phase")
+        if self.LABEL_NAME not in df.columns and phase != Phase.PREDICT:
+            raise ValueError(f"columns of '{self.LABEL_NAME}' is necesasry on train or eval phase")
 
-        if "class" not in df.columns:
+        if self.LABEL_NAME not in df.columns:
             self.setup(df.values)
         else:
-            self.setup(df.drop(columns=["class"]).values, df.loc[:, "class"].values)
+            self.setup(df.drop(columns=[self.LABEL_NAME]).values, df.loc[:, self.LABEL_NAME].values)
 
         self.logger.info("==============================")
         self.logger.info(f"TableDataset {phase.name}")
@@ -90,7 +94,12 @@ class TableDataset(BaseDataset):
 
     @property
     def df(self):
-        return self._df
+        tensor = self.xs
+        if self.ys[0] != self.LABEL_NONE:
+            tensor = torch.cat([self.xs, self.ys.unsqueeze(1)], dim=1)
+        df = pd.DataFrame(tensor.numpy())
+        df.columns = self._column_names
+        return df
 
 
 class BalancedBatchSampler(torch.utils.data.BatchSampler):
@@ -141,16 +150,16 @@ class Trainer:
     @property
     def model(self) -> Model:
         if self._model is None:
-            assert False, "model is not initialized"
+            raise ValueError("model is not initialized")
         return self._model
 
     @property
     def optimizer(self) -> optim.Optimizer:
         if self._optimizer is None:
-            assert False, "optimizer is not initialized"
+            raise ValueError("optimizer is not initialized")
         return self._optimizer
 
-    def _setup(self, phase: Phase, df=None, is_load=False):
+    def _setup(self, phase: Phase, df=None):
         if phase in self.dataloader:
             return
 
@@ -173,7 +182,7 @@ class Trainer:
                     self.config.model_path, map_location=self.config.device
                 )
 
-            if is_load and loaded_data is None:
+            if phase == Phase.PREDICT and loaded_data is None:
                 raise ValueError("model_path is necessary on predict")
 
             self._model = Model(
@@ -280,21 +289,23 @@ class Trainer:
             self.report(y_trues, y_preds)
 
     @torch.no_grad()
-    def predict(self):
-        self._setup(Phase.PREDICT)
+    def predict(self, df_predict: pd.DataFrame = None) -> pd.DataFrame:
+        self._setup(Phase.PREDICT, df_predict)
         self.model.eval()
-
-        config = self.config
-        os.makedirs(os.path.dirname(config.predict_output), exist_ok=True)
 
         dataloader = self.dataloader[Phase.PREDICT]
         y_preds, _ = self.predict_scores(dataloader)
 
         df = dataloader.dataset.df
         df["score"] = y_preds
-        df.to_csv(config.predict_output)
 
-        self.logger.info(f"write predict result to {config.predict_output}")
+        config = self.config
+        if config.predict_output:
+            os.makedirs(os.path.dirname(config.predict_output), exist_ok=True)
+            df.to_csv(config.predict_output)
+            self.logger.info(f"write predict result to {config.predict_output}")
+
+        return df
 
     @torch.no_grad()
     def predict_scores(self, dataloader: DataLoader) -> tuple[torch.Tensor, torch.Tensor]:
