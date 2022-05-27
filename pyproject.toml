@@ -1,8 +1,12 @@
 [tool.poetry]
 name = "devnet"
 version = "0.1.0"
-description = ""
+description = "Unofficial pytorch implementation of deviation network for table data."
 authors = ["Yuji Kamiya <y.kamiya0@gmail.com>"]
+license = "MIT"
+homepage = "https://github.com/y-kamiya/devnet"
+repository = "https://github.com/y-kamiya/devnet"
+readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.7.1,<4.0"
