@@ -1,4 +1,4 @@
-from setuptools import find_namespace_packages, setup
+from setuptools import find_namespace_packages, setup, find_packages
 
 setup(
     name="devnet",
@@ -7,7 +7,9 @@ setup(
     author="Yuji Kamiya",
     author_email="y.kamiya0@gmail.com",
     license="MIT",
-    packages='src/devnet',
+    packages=find_packages(where='src'),
+    # packages=find_packages(where='src'),
+    package_dir={'': 'src'},
     python_requires="~=3.8",
     install_requires=["pandas", "torch", 'scikit-learn'],
     zip_safe=False,
